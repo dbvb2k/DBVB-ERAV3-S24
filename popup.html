@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stock Price Monitor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Stock Price Monitor</h1>
+
+        <div class="add-stock">
+            <h2>Add Stock</h2>
+            <input type="text" id="stockSymbol" placeholder="Stock Symbol (e.g., HDFCBANK)">
+            <div class="threshold-inputs">
+                <input type="number" id="lowerThreshold" placeholder="Lower Threshold">
+                <input type="number" id="upperThreshold" placeholder="Upper Threshold">
+            </div>
+            <button id="addStock">Add Stock</button>
+        </div>
+
+        <div class="stock-list">
+            <h2>Monitored Stocks</h2>
+            <div id="stocks"></div>
+        </div>
+
+        <div class="actions">
+            <button id="clearAll">Clear All Stocks</button>
+        </div>
+
+        <div class="config-sections">
+            <div class="config-section">
+                <div class="config-header" data-config-id="api-config">
+                    <h2>API Configuration</h2>
+                    <span class="toggle-icon">▶</span>
+                </div>
+                <div class="config-content" id="api-config">
+                    <div class="input-group">
+                        <label for="apiKey">Gemini API Key:</label>
+                        <input type="password" id="apiKey" placeholder="Enter your Gemini API key">
+                        <button id="saveApiKey">Save API Key</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <div class="config-header" data-config-id="llm-config">
+                    <h2>LLM Configuration</h2>
+                    <span class="toggle-icon">▶</span>
+                </div>
+                <div class="config-content" id="llm-config">
+                    <div class="config-group">
+                        <div class="config-item">
+                            <label for="model">Model:</label>
+                            <select id="model">
+                                <option value="gemini-pro">Gemini Pro</option>
+                                <option value="gemini-pro-vision">Gemini Pro Vision</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label for="temperature">Temperature:</label>
+                            <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7">
+                            <span id="temperatureValue">0.7</span>
+                        </div>
+                        <div class="config-item">
+                            <label for="maxTokens">Max Tokens:</label>
+                            <input type="number" id="maxTokens" min="100" max="2048" value="1000">
+                        </div>
+                        <div class="config-item">
+                            <label for="maxRetries">Max Retries:</label>
+                            <input type="number" id="maxRetries" min="0" max="5" value="3">
+                        </div>
+                        <div class="config-item">
+                            <label for="timeout">Timeout (ms):</label>
+                            <input type="number" id="timeout" min="1000" max="30000" value="10000">
+                        </div>
+                        <hr class="config-divider">
+                        <div class="config-item">
+                            <label for="cooldownPeriod">Cooldown Period (minutes):</label>
+                            <input type="number" id="cooldownPeriod" min="1" max="60" value="5">
+                        </div>
+                        <div class="config-item">
+                            <label for="maxAlerts">Max Alerts per Threshold:</label>
+                            <input type="number" id="maxAlerts" min="1" max="10" value="2">
+                        </div>
+                    </div>
+                    <button id="saveConfig">Save Configuration</button>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <div class="config-header" data-config-id="console-log">
+                    <h2>Console Log</h2>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="config-content" id="console-log">
+                    <div class="log-container">
+                        <div class="log-header">
+                            <div class="button-group">
+                                <button id="clearLog">Clear Log</button>
+                                <button id="copyLog">Copy Log</button>
+                                <button id="downloadLog">Download Logs</button>
+                            </div>
+                            <div class="resize-handle"></div>
+                        </div>
+                        <div class="log-content" id="logContent"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="popup.js"></script>
+</body>
+</html> 
