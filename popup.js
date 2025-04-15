@@ -1,41 +1,77 @@
 // Import LLM service
 import { updateConfig, config } from './llm_service.js';
 
+// Import Logger
+import Logger from './logger.js';
+
 // Load saved configuration
 async function loadConfig() {
-    const savedConfig = await chrome.storage.local.get('llm_config');
-    if (savedConfig.llm_config) {
-        updateConfig(savedConfig.llm_config);
-        updateUIFromConfig(savedConfig.llm_config);
+    try {
+        const { llm_config } = await chrome.storage.local.get('llm_config');
+        if (llm_config) {
+            updateConfig(llm_config);
+            updateUIFromConfig(llm_config);
+        } else {
+            // Set default configuration if none exists
+            const defaultConfig = {
+                model: 'gemini-pro',
+                temperature: 0.7,
+                maxTokens: 1000,
+                maxRetries: 3,
+                timeout: 10000,
+                cooldownPeriod: 5,
+                maxAlerts: 2
+            };
+            await saveConfig(defaultConfig);
+            updateConfig(defaultConfig);
+            updateUIFromConfig(defaultConfig);
+            logMessage('Initialized default LLM configuration', 'info');
+        }
+    } catch (error) {
+        logMessage(`Error loading configuration: ${error.message}`, 'error');
     }
 }
 
 // Update UI from configuration
 function updateUIFromConfig(config) {
-    document.getElementById('model').value = config.model;
-    document.getElementById('temperature').value = config.temperature;
-    document.getElementById('temperatureValue').textContent = config.temperature;
-    document.getElementById('maxTokens').value = config.maxTokens;
-    document.getElementById('maxRetries').value = config.maxRetries;
-    document.getElementById('timeout').value = config.timeout;
-    document.getElementById('cooldownPeriod').value = config.cooldownPeriod || 5;
-    document.getElementById('maxAlerts').value = config.maxAlerts || 2;
+    if (!config) return;
+    
+    const elements = {
+        'model': config.model || 'gemini-pro',
+        'temperature': config.temperature || 0.7,
+        'maxTokens': config.maxTokens || 1000,
+        'maxRetries': config.maxRetries || 3,
+        'timeout': config.timeout || 10000,
+        'cooldownPeriod': config.cooldownPeriod || 5,
+        'maxAlerts': config.maxAlerts || 2
+    };
+
+    for (const [id, value] of Object.entries(elements)) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.value = value;
+            if (id === 'temperature') {
+                document.getElementById('temperatureValue').textContent = value;
+            }
+        }
+    }
 }
 
 // Save configuration
-async function saveConfig() {
-    const config = {
-        model: document.getElementById('model').value,
-        temperature: parseFloat(document.getElementById('temperature').value),
-        maxTokens: parseInt(document.getElementById('maxTokens').value),
-        maxRetries: parseInt(document.getElementById('maxRetries').value),
-        timeout: parseInt(document.getElementById('timeout').value),
-        cooldownPeriod: parseInt(document.getElementById('cooldownPeriod').value),
-        maxAlerts: parseInt(document.getElementById('maxAlerts').value)
-    };
-
+async function saveConfig(configToSave = null) {
     try {
+        const config = configToSave || {
+            model: document.getElementById('model').value,
+            temperature: parseFloat(document.getElementById('temperature').value),
+            maxTokens: parseInt(document.getElementById('maxTokens').value),
+            maxRetries: parseInt(document.getElementById('maxRetries').value),
+            timeout: parseInt(document.getElementById('timeout').value),
+            cooldownPeriod: parseInt(document.getElementById('cooldownPeriod').value),
+            maxAlerts: parseInt(document.getElementById('maxAlerts').value)
+        };
+
         await chrome.storage.local.set({ llm_config: config });
+        updateConfig(config);
         logMessage('LLM configuration saved successfully', 'success');
         console.log('Saved LLM config:', config);
     } catch (error) {
@@ -174,26 +210,80 @@ function toggleConfig(configId) {
     toggleIcon.textContent = isExpanded ? '▶' : '▼';
 }
 
+// Function to display log in the console window
+function displayLogInConsole(logEntry) {
+    if (!logEntry) return;
+    
+    const logContent = document.getElementById('logContent');
+    if (!logContent) return;
+
+    const logDiv = document.createElement('div');
+    logDiv.className = `log-entry ${logEntry.type || 'info'}`;
+    
+    // Handle LLM interaction logs
+    if (logEntry.type === 'llm' && logEntry.details) {
+        const { symbol, request, response, currentPrice, lowerThreshold, upperThreshold } = logEntry.details;
+        
+        // Create main log entry
+        logDiv.innerHTML = `<span class="timestamp">[${logEntry.timestamp}]</span>  <span class="type">LLM</span>  <span class="message">Analysis for ${symbol} (₹${currentPrice})</span>`;
+        logContent.appendChild(logDiv);
+        
+        // Create details section
+        const details = document.createElement('div');
+        details.className = 'llm-details';
+        details.innerHTML = `
+            <div class="llm-content">
+                <div class="thresholds">Thresholds: ₹${lowerThreshold} - ₹${upperThreshold}</div>
+                <div class="request"><strong>Request:</strong><pre>${request}</pre></div>
+                <div class="response"><strong>Response:</strong><pre>${response}</pre></div>
+            </div>`;
+        logContent.appendChild(details);
+    } else {
+        // Regular log entry
+        let message = logEntry.message || '';
+        
+        // Format JSON content if present
+        if (typeof message === 'string' && 
+            (message.startsWith('{') || message.startsWith('['))) {
+            try {
+                const jsonObj = JSON.parse(message);
+                const formattedJson = JSON.stringify(jsonObj, null, 2);
+                logDiv.innerHTML = `<span class="timestamp">[${logEntry.timestamp}]</span>  <span class="type">${logEntry.type.toUpperCase()}</span>  <span class="message">JSON Response:</span>`;
+                const pre = document.createElement('pre');
+                pre.textContent = formattedJson;
+                logDiv.appendChild(pre);
+                logContent.appendChild(logDiv);
+                logContent.scrollTop = logContent.scrollHeight;
+                return;
+            } catch (e) {
+                // Not valid JSON, continue with regular message
+            }
+        }
+
+        // Regular message with stock symbol highlighting
+        const highlightedMessage = highlightStockSymbols(message);
+        logDiv.innerHTML = `<span class="timestamp">[${logEntry.timestamp}]</span>  <span class="type">${(logEntry.type || 'info').toUpperCase()}</span>  <span class="message">${highlightedMessage}</span>`;
+        logContent.appendChild(logDiv);
+    }
+    
+    logContent.scrollTop = logContent.scrollHeight;
+}
+
 // Function to generate a consistent color for a stock symbol
 function getStockColor(symbol) {
-    // Create a simple hash of the symbol
     let hash = 0;
     for (let i = 0; i < symbol.length; i++) {
         hash = symbol.charCodeAt(i) + ((hash << 5) - hash);
     }
-    
-    // Convert hash to a color
     const hue = Math.abs(hash % 360);
     return `hsl(${hue}, 70%, 50%)`;
 }
 
 // Function to highlight stock symbols in the message
 function highlightStockSymbols(message) {
-    // Find all stock symbols in the message (uppercase words with 2-10 characters)
     const stockSymbols = message.match(/\b[A-Z]{2,10}\b/g) || [];
     let highlightedMessage = message;
     
-    // Replace each stock symbol with a colored span
     stockSymbols.forEach(symbol => {
         const color = getStockColor(symbol);
         const regex = new RegExp(`\\b${symbol}\\b`, 'g');
@@ -207,31 +297,16 @@ function highlightStockSymbols(message) {
 }
 
 // Function to send log to popup
-function logMessage(message, type = 'info') {
-    const timestamp = new Date().toLocaleTimeString();
-    const logContent = document.getElementById('logContent');
-    const logEntry = document.createElement('div');
-    logEntry.className = `log-entry ${type}`;
-    logEntry.style.fontFamily = 'monospace';
-    logEntry.style.whiteSpace = 'pre';
-    
-    // Highlight stock symbols in the message
-    const highlightedMessage = highlightStockSymbols(message);
-    
-    logEntry.innerHTML = `[${timestamp}] ${type.toUpperCase()}  ${highlightedMessage}`;
-    logContent.appendChild(logEntry);
-    logContent.scrollTop = logContent.scrollHeight;
-
-    // Store the log in Chrome storage
-    chrome.storage.local.get(['logs'], function(result) {
-        const logs = result.logs || [];
-        logs.push({
-            timestamp,
+function logMessage(message, type = 'info', details = null) {
+    Logger.log(message, type, details).then(() => {
+        displayLogInConsole({
+            timestamp: new Date().toLocaleTimeString(),
             type,
             message,
-            html: logEntry.outerHTML
+            details
         });
-        chrome.storage.local.set({ logs });
+    }).catch(error => {
+        console.error('Error logging message:', error);
     });
 }
 
@@ -252,9 +327,7 @@ function loadLogs() {
 
 // Function to clear logs
 function clearLogs() {
-    const logContent = document.getElementById('logContent');
-    logContent.innerHTML = '';
-    chrome.storage.local.set({ logs: [] });
+    Logger.clearLogs();
 }
 
 // Function to copy logs to clipboard
@@ -283,8 +356,8 @@ async function copyLogs() {
 // Function to download logs
 async function downloadLogs() {
     try {
-        const { logs } = await chrome.storage.local.get('logs');
-        if (!logs || logs.length === 0) {
+        const { logs, llm_interactions } = await Logger.getLogs();
+        if (!logs.length && !llm_interactions.length) {
             logMessage('No logs to download', 'warning');
             return;
         }
@@ -293,13 +366,11 @@ async function downloadLogs() {
         const date = new Date().toISOString().split('T')[0];
         const filename = `stock_monitor_logs_${date}.txt`;
 
-        // Format logs for download
-        const formattedLogs = logs.map(log => 
-            `[${log.timestamp}] ${log.type.toUpperCase()}  ${log.message}`
-        ).join('\n');
+        // Format and combine all logs
+        const allLogs = Logger.formatLogsForDownload(logs, llm_interactions);
 
         // Create blob and download
-        const blob = new Blob([formattedLogs], { type: 'text/plain' });
+        const blob = new Blob([allLogs], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -316,9 +387,21 @@ async function downloadLogs() {
     }
 }
 
+// Load existing logs when popup opens
+async function loadExistingLogs() {
+    const { logs } = await Logger.getLogs();
+    const logContent = document.getElementById('logContent');
+    logContent.innerHTML = ''; // Clear existing content
+    
+    logs.forEach(log => {
+        displayLogInConsole(log);
+    });
+}
+
 // Initialize the popup
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     console.log('Popup initialized'); // Debug log
+    await loadExistingLogs();
     logMessage('Popup initialized', 'info');
     
     // Load initial data
@@ -370,7 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Listen for messages from background script
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'log') {
-            logMessage(message.data.message, message.data.type);
+            displayLogInConsole(message.data);
         }
     });
 

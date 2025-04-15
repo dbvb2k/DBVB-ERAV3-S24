@@ -1,3 +1,6 @@
+// Import Logger
+import Logger from './logger.js';
+
 // Stock symbol to MoneyControl code mapping
 const stockSymbolMap = {
     'HDFCBANK': 'HDF01',
@@ -25,40 +28,26 @@ const notificationState = {};
 const llmCallState = {};
 
 // Function to send logs to popup
-function sendLogToPopup(message, type = 'info') {
+function sendLogToPopup(message, type = 'info', details = null) {
+    Logger.log(message, type, details);
+}
+
+// Function to format API response for logging
+function formatAPIResponse(response) {
     try {
-        const timestamp = new Date().toLocaleTimeString();
-        const logEntry = {
-            timestamp,
-            type,
-            message,
-            html: `<div class="log-entry ${type}" style="font-family: monospace; white-space: pre;">[${timestamp}] ${type.toUpperCase()}  ${message}</div>`
+        const responseData = response.data;
+        return {
+            symbol: responseData.NSEID,
+            price: responseData.pricecurrent,
+            change: responseData.pricechange,
+            changePercent: responseData.pricepercentchange,
+            volume: responseData.VOL,
+            dayRange: `₹${responseData.LP} - ₹${responseData.HP}`,
+            yearRange: `₹${responseData['52L']} - ₹${responseData['52H']}`,
+            lastUpdate: responseData.lastupd
         };
-
-        // Store the log in Chrome storage
-        chrome.storage.local.get(['logs'], function(result) {
-            const logs = result.logs || [];
-            logs.push(logEntry);
-            chrome.storage.local.set({ logs });
-        });
-
-        // Try to send to popup if it's open
-        chrome.runtime.sendMessage({
-            action: 'log',
-            data: {
-                message,
-                type
-            }
-        }).catch(error => {
-            // Ignore the error if popup is not open
-            if (error.message.includes('Receiving end does not exist')) {
-                console.log(`[${timestamp}] ${type.toUpperCase()}  ${message}`);
-            } else {
-                console.error('Error sending log:', error);
-            }
-        });
     } catch (error) {
-        console.error('Error in sendLogToPopup:', error);
+        return response;
     }
 }
 
@@ -68,12 +57,12 @@ async function fetchStockPrice(symbol) {
         // Get the MoneyControl code for the symbol
         const moneyControlCode = stockSymbolMap[symbol];
         if (!moneyControlCode) {
-            sendLogToPopup(`Symbol ${symbol} not found in mapping`, 'error');
+            await Logger.log(`Symbol ${symbol} not found in mapping`, 'error');
             throw new Error(`Symbol ${symbol} not found in mapping`);
         }
 
         const url = `https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/${moneyControlCode}`;
-        sendLogToPopup(`Fetching price for ${symbol} from: ${url}`, 'info');
+        await Logger.log(`Fetching price for ${symbol} from: ${url}`, 'info');
 
         // Fetch the price using MoneyControl's API
         const response = await fetch(url, {
@@ -85,24 +74,25 @@ async function fetchStockPrice(symbol) {
         });
 
         if (!response.ok) {
-            sendLogToPopup(`HTTP error for ${symbol}: ${response.status}`, 'error');
+            await Logger.log(`HTTP error for ${symbol}: ${response.status}`, 'error');
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const data = await response.json();
-        sendLogToPopup(`Received response for ${symbol}: ${JSON.stringify(data)}`, 'info');
+        const responseJson = await response.json();
+        const formattedResponse = formatAPIResponse(responseJson);
+        await Logger.log(`Received response for ${symbol}: ${JSON.stringify(formattedResponse, null, 2)}`, 'info');
         
-        if (data && data.data && data.data.pricecurrent) {
-            const price = parseFloat(data.data.pricecurrent);
-            sendLogToPopup(`Current price for ${symbol}: ${price}`, 'success');
+        if (responseJson && responseJson.data && responseJson.data.pricecurrent) {
+            const price = parseFloat(responseJson.data.pricecurrent);
+            await Logger.log(`Current price for ${symbol}: ${price}`, 'success');
             return price;
         } else {
-            sendLogToPopup(`Price not found in response for ${symbol}`, 'error');
+            await Logger.log(`Price not found in response for ${symbol}`, 'error');
             throw new Error('Price not found in response');
         }
     } catch (error) {
         console.error(`Error fetching price for ${symbol}:`, error);
-        sendLogToPopup(`Error fetching price for ${symbol}: ${error.message}`, 'error');
+        await Logger.log(`Error fetching price for ${symbol}: ${error.message}`, 'error');
         return null;
     }
 }
@@ -146,9 +136,9 @@ async function getLLMResponse(symbol, currentPrice, lowerThreshold, upperThresho
 
         // Build the prompt
         const prompt = `You are a stock monitoring agent. Your task is to monitor ${symbol} stock price.
-Current price: ${currentPrice}
-Lower threshold: ${lowerThreshold}
-Upper threshold: ${upperThreshold}
+Current price: ₹${currentPrice}
+Lower threshold: ₹${lowerThreshold}
+Upper threshold: ₹${upperThreshold}
 Previous price movements: ${conversationHistory[symbol].slice(-5).join('\n')}
 
 Analyze the current situation and provide a brief recommendation. Consider:
@@ -159,7 +149,13 @@ Analyze the current situation and provide a brief recommendation. Consider:
 Respond in a concise format.`;
 
         // Log the prompt being sent to LLM
-        sendLogToPopup(`Sending prompt to LLM for ${symbol}:\n${prompt}`, 'info');
+        await Logger.log('Sending prompt to LLM', 'info', {
+            symbol,
+            request: prompt,
+            currentPrice,
+            lowerThreshold,
+            upperThreshold
+        });
 
         // Simulate LLM response with more detailed analysis
         let response;
@@ -178,19 +174,23 @@ Respond in a concise format.`;
             }
         }
 
-        // Log the LLM interaction
-        await logLLMInteraction(symbol, prompt, response);
-
-        // Log the LLM response
-        sendLogToPopup(`Received LLM response for ${symbol}:\n${response}`, 'success');
+        // Log LLM interaction with all details
+        await Logger.log('LLM Analysis', 'llm', {
+            symbol,
+            request: prompt,
+            response,
+            currentPrice,
+            lowerThreshold,
+            upperThreshold
+        });
 
         // Add to conversation history
-        conversationHistory[symbol].push(`Price: ${currentPrice} | Analysis: ${response}`);
+        conversationHistory[symbol].push(`Price: ₹${currentPrice} | Analysis: ${response}`);
 
         return response;
     } catch (error) {
         console.error(`Error getting LLM response for ${symbol}:`, error);
-        sendLogToPopup(`Error getting LLM response for ${symbol}: ${error.message}`, 'error');
+        await Logger.log(`Error getting LLM response for ${symbol}: ${error.message}`, 'error');
         return "Error in analysis";
     }
 }
@@ -250,122 +250,132 @@ function shouldSendAlert(symbol, currentPrice, lower, upper) {
 
 // Check stocks and send notifications
 async function checkStocks() {
-    const { llm_config } = await chrome.storage.local.get('llm_config');
-    const { stocks } = await chrome.storage.local.get('stocks');
-    
-    if (!stocks || stocks.length === 0) {
-        sendLogToPopup('No stocks being monitored', 'info');
-        return;
-    }
-
-    // Log current configuration
-    sendLogToPopup(`Current LLM config: ${JSON.stringify(llm_config)}`, 'info');
-    
-    for (const stock of stocks) {
-        try {
-            const price = await fetchStockPrice(stock.symbol);
-            if (price === null) {
-                sendLogToPopup(`Failed to fetch price for ${stock.symbol}`, 'error');
-                continue;
-            }
-            
-            const currentTime = Date.now();
-            
-            // Initialize notification state for this stock if not exists
-            if (!notificationState[stock.symbol]) {
-                notificationState[stock.symbol] = {
-                    lastNotification: 0,
-                    alertCount: 0
-                };
-            }
-            
-            // Initialize LLM call state if not exists
-            if (!llmCallState[stock.symbol]) {
-                llmCallState[stock.symbol] = {
-                    lastCall: 0
-                };
-            }
-            
-            const state = notificationState[stock.symbol];
-            const llmState = llmCallState[stock.symbol];
-            const cooldownPeriod = (llm_config?.cooldownPeriod || 5) * 60 * 1000; // Convert to milliseconds
-            const maxAlerts = llm_config?.maxAlerts || 2;
-            const llmCooldown = 15 * 60 * 1000; // 15 minutes cooldown for LLM calls
-            
-            // Log current state
-            sendLogToPopup(`Checking ${stock.symbol}: Price=₹${price}, Lower=₹${stock.lowerThreshold}, Upper=₹${stock.upperThreshold}`, 'info');
-            
-            // Calculate price differences from thresholds
-            const lowerDiff = ((price - stock.lowerThreshold) / stock.lowerThreshold * 100).toFixed(2);
-            const upperDiff = ((stock.upperThreshold - price) / stock.upperThreshold * 100).toFixed(2);
-            
-            sendLogToPopup(`Price differences for ${stock.symbol}: Lower=${lowerDiff}%, Upper=${upperDiff}%`, 'info');
-            
-            // Check if we should call LLM
-            const shouldCallLLM = (Math.abs(lowerDiff) <= 5 || Math.abs(upperDiff) <= 5) && 
-                                (currentTime - llmState.lastCall >= llmCooldown);
-            
-            if (shouldCallLLM) {
-                sendLogToPopup(`Calling LLM for ${stock.symbol} (Price within 5% of threshold)`, 'info');
-                try {
-                    const llmResponse = await getLLMResponse(
-                        stock.symbol,
-                        price,
-                        stock.lowerThreshold,
-                        stock.upperThreshold
-                    );
-                    llmState.lastCall = currentTime;
-                    sendLogToPopup(`LLM analysis for ${stock.symbol}: ${llmResponse}`, 'success');
-                } catch (error) {
-                    sendLogToPopup(`Error getting LLM response for ${stock.symbol}: ${error.message}`, 'error');
-                }
-            } else {
-                if (Math.abs(lowerDiff) > 5 && Math.abs(upperDiff) > 5) {
-                    sendLogToPopup(`Skipping LLM for ${stock.symbol} (Price not within 5% of thresholds)`, 'info');
-                } else if (currentTime - llmState.lastCall < llmCooldown) {
-                    const minutesLeft = Math.ceil((llmCooldown - (currentTime - llmState.lastCall)) / 60000);
-                    sendLogToPopup(`Skipping LLM for ${stock.symbol} (Cooldown period: ${minutesLeft} minutes left)`, 'info');
-                }
-            }
-            
-            // Check if we should send a notification
-            if (currentTime - state.lastNotification < cooldownPeriod) {
-                sendLogToPopup(`Skipping notification for ${stock.symbol} (within cooldown period)`, 'info');
-                continue;
-            }
-            
-            if (state.alertCount >= maxAlerts) {
-                sendLogToPopup(`Skipping notification for ${stock.symbol} (max alerts reached)`, 'info');
-                continue;
-            }
-            
-            if (price <= stock.lowerThreshold) {
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon48.png',
-                    title: `Price Alert: ${stock.symbol}`,
-                    message: `Price dropped to ₹${price} (below threshold of ₹${stock.lowerThreshold})`,
-                    priority: 2
-                });
-                state.lastNotification = currentTime;
-                state.alertCount++;
-                sendLogToPopup(`Sent lower threshold alert for ${stock.symbol}`, 'success');
-            } else if (price >= stock.upperThreshold) {
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon48.png',
-                    title: `Price Alert: ${stock.symbol}`,
-                    message: `Price rose to ₹${price} (above threshold of ₹${stock.upperThreshold})`,
-                    priority: 2
-                });
-                state.lastNotification = currentTime;
-                state.alertCount++;
-                sendLogToPopup(`Sent upper threshold alert for ${stock.symbol}`, 'success');
-            }
-        } catch (error) {
-            console.error(`Error checking stock ${stock.symbol}:`, error);
-            sendLogToPopup(`Error checking stock ${stock.symbol}: ${error.message}`, 'error');
+    try {
+        const { stocks, llm_config } = await chrome.storage.local.get(['stocks', 'llm_config']);
+        
+        if (!stocks || stocks.length === 0) {
+            await Logger.log('No stocks being monitored', 'info');
+            return;
         }
+
+        // Use default config if none exists
+        const config = llm_config || {
+            cooldownPeriod: 5,
+            maxAlerts: 2
+        };
+
+        // Log current configuration
+        await Logger.log(`Current LLM config: ${JSON.stringify(config)}`, 'info');
+        
+        for (const stock of stocks) {
+            try {
+                const price = await fetchStockPrice(stock.symbol);
+                if (price === null) {
+                    sendLogToPopup(`Failed to fetch price for ${stock.symbol}`, 'error');
+                    continue;
+                }
+                
+                const currentTime = Date.now();
+                
+                // Initialize notification state for this stock if not exists
+                if (!notificationState[stock.symbol]) {
+                    notificationState[stock.symbol] = {
+                        lastNotification: 0,
+                        alertCount: 0
+                    };
+                }
+                
+                // Initialize LLM call state if not exists
+                if (!llmCallState[stock.symbol]) {
+                    llmCallState[stock.symbol] = {
+                        lastCall: 0
+                    };
+                }
+                
+                const state = notificationState[stock.symbol];
+                const llmState = llmCallState[stock.symbol];
+                const cooldownPeriod = (config.cooldownPeriod || 5) * 60 * 1000; // Convert to milliseconds
+                const maxAlerts = config.maxAlerts || 2;
+                const llmCooldown = 15 * 60 * 1000; // 15 minutes cooldown for LLM calls
+                
+                // Log current state
+                sendLogToPopup(`Checking ${stock.symbol}: Price=₹${price}, Lower=₹${stock.lowerThreshold}, Upper=₹${stock.upperThreshold}`, 'info');
+                
+                // Calculate price differences from thresholds
+                const lowerDiff = ((price - stock.lowerThreshold) / stock.lowerThreshold * 100).toFixed(2);
+                const upperDiff = ((stock.upperThreshold - price) / stock.upperThreshold * 100).toFixed(2);
+                
+                sendLogToPopup(`Price differences for ${stock.symbol}: Lower=${lowerDiff}%, Upper=${upperDiff}%`, 'info');
+                
+                // Check if we should call LLM
+                const shouldCallLLM = (Math.abs(lowerDiff) <= 5 || Math.abs(upperDiff) <= 5) && 
+                                    (currentTime - llmState.lastCall >= llmCooldown);
+                
+                if (shouldCallLLM) {
+                    sendLogToPopup(`Calling LLM for ${stock.symbol} (Price within 5% of threshold)`, 'info');
+                    try {
+                        const llmResponse = await getLLMResponse(
+                            stock.symbol,
+                            price,
+                            stock.lowerThreshold,
+                            stock.upperThreshold
+                        );
+                        llmState.lastCall = currentTime;
+                        sendLogToPopup(`LLM analysis for ${stock.symbol}: ${llmResponse}`, 'success');
+                    } catch (error) {
+                        sendLogToPopup(`Error getting LLM response for ${stock.symbol}: ${error.message}`, 'error');
+                    }
+                } else {
+                    if (Math.abs(lowerDiff) > 5 && Math.abs(upperDiff) > 5) {
+                        sendLogToPopup(`Skipping LLM for ${stock.symbol} (Price not within 5% of thresholds)`, 'info');
+                    } else if (currentTime - llmState.lastCall < llmCooldown) {
+                        const minutesLeft = Math.ceil((llmCooldown - (currentTime - llmState.lastCall)) / 60000);
+                        sendLogToPopup(`Skipping LLM for ${stock.symbol} (Cooldown period: ${minutesLeft} minutes left)`, 'info');
+                    }
+                }
+                
+                // Check if we should send a notification
+                if (currentTime - state.lastNotification < cooldownPeriod) {
+                    sendLogToPopup(`Skipping notification for ${stock.symbol} (within cooldown period)`, 'info');
+                    continue;
+                }
+                
+                if (state.alertCount >= maxAlerts) {
+                    sendLogToPopup(`Skipping notification for ${stock.symbol} (max alerts reached)`, 'info');
+                    continue;
+                }
+                
+                if (price <= stock.lowerThreshold) {
+                    chrome.notifications.create({
+                        type: 'basic',
+                        iconUrl: 'icons/icon48.png',
+                        title: `Price Alert: ${stock.symbol}`,
+                        message: `Price dropped to ₹${price} (below threshold of ₹${stock.lowerThreshold})`,
+                        priority: 2
+                    });
+                    state.lastNotification = currentTime;
+                    state.alertCount++;
+                    sendLogToPopup(`Sent lower threshold alert for ${stock.symbol}`, 'success');
+                } else if (price >= stock.upperThreshold) {
+                    chrome.notifications.create({
+                        type: 'basic',
+                        iconUrl: 'icons/icon48.png',
+                        title: `Price Alert: ${stock.symbol}`,
+                        message: `Price rose to ₹${price} (above threshold of ₹${stock.upperThreshold})`,
+                        priority: 2
+                    });
+                    state.lastNotification = currentTime;
+                    state.alertCount++;
+                    sendLogToPopup(`Sent upper threshold alert for ${stock.symbol}`, 'success');
+                }
+            } catch (error) {
+                console.error(`Error checking stock ${stock.symbol}:`, error);
+                sendLogToPopup(`Error checking stock ${stock.symbol}: ${error.message}`, 'error');
+            }
+        }
+    } catch (error) {
+        console.error('Error in checkStocks:', error);
+        await Logger.log(`Error checking stocks: ${error.message}`, 'error');
     }
 }
 
