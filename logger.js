@@ -1,12 +1,26 @@
 // Logger class for centralized logging
 class Logger {
     static async log(message, type = 'info', details = null) {
-        const timestamp = new Date().toLocaleTimeString();
+        // Ensure message is a string and not undefined
+        const formattedMessage = message ? String(message) : 'No message provided';
+        
+        // Ensure type is valid
+        const validTypes = ['info', 'success', 'warning', 'error', 'llm'];
+        const validType = validTypes.includes(type) ? type : 'info';
+        
+        // Format timestamp consistently
+        const timestamp = new Date().toLocaleTimeString('en-US', {
+            hour12: true,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
         const logEntry = {
             timestamp,
-            type: type || 'info',
-            message: message || '',
-            details: details || null
+            type: validType,
+            message: formattedMessage,
+            details: details && typeof details === 'object' ? details : null
         };
 
         try {
@@ -60,7 +74,7 @@ class Logger {
             } catch (error) {
                 // Popup not open, log to console
                 if (error.message.includes('Receiving end does not exist')) {
-                    let consoleMessage = `[${timestamp}] ${type.toUpperCase()}  ${logEntry.message}`;
+                    let consoleMessage = `[${timestamp}] ${validType.toUpperCase()}  ${formattedMessage}`;
                     if (details) {
                         consoleMessage += '\nDetails: ' + JSON.stringify(details, null, 2);
                     }
@@ -90,9 +104,9 @@ class Logger {
     static async clearLogs() {
         try {
             await chrome.storage.local.set({ logs: [], llm_interactions: [] });
-            await this.log('Logs cleared', 'info');
         } catch (error) {
             console.error('Error clearing logs:', error);
+            throw error;
         }
     }
 

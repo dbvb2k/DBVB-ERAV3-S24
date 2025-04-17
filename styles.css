@@ -91,11 +91,18 @@ button {
     border-radius: 5px;
     cursor: pointer;
     font-size: 14px;
-    transition: background-color 0.3s;
+    transition: all 0.2s ease-in-out;
 }
 
 button:hover {
     background-color: #2980b9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+button:active {
+    transform: translateY(1px);
+    box-shadow: none;
 }
 
 .add-stock {
@@ -159,12 +166,16 @@ button:hover {
 
 #clearAll {
     background-color: #e74c3c;
-    width: 100%;
-    margin-top: 20px;
 }
 
 #clearAll:hover {
     background-color: #c0392b;
+}
+
+#clearAll:active {
+    background-color: #a93226;
+    transform: translateY(1px);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .actions {
@@ -208,15 +219,64 @@ button:hover {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background-color 0.3s;
+    transition: all 0.2s ease-in-out;
+    position: relative;
+    overflow: hidden;
 }
 
+/* Hover effect for regular buttons */
 .log-header button:hover {
-    background-color: #f0f0f0;
+    background-color: #2980b9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.log-header button:last-child {
-    margin-right: 0;
+/* Active/Click effect for regular buttons */
+.log-header button:active {
+    transform: translateY(1px);
+    box-shadow: none;
+}
+
+/* Specific styles for Clear Log button */
+#clearLog {
+    background-color: #e74c3c;
+}
+
+#clearLog:hover {
+    background-color: #c0392b;
+}
+
+/* Active/Click effect for Clear Log button */
+#clearLog:active {
+    background-color: #a93226;
+    transform: translateY(1px);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Ensure text remains visible during hover */
+.log-header button:hover,
+.log-header button:active {
+    color: #ffffff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Add focus styles for accessibility */
+.log-header button:focus {
+    outline: 2px solid #4a90e2;
+    outline-offset: 2px;
+}
+
+/* Remove outline when using mouse */
+.log-header button:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* Style for disabled state */
+.log-header button:disabled {
+    background-color: #95a5a6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
 }
 
 .resize-handle {
@@ -242,12 +302,6 @@ button:hover {
     font-family: 'Consolas', monospace;
     font-size: 12px;
     line-height: 1.6;
-}
-
-#clearLog {
-    background-color: #e74c3c;
-    padding: 5px 10px;
-    font-size: 12px;
 }
 
 .log-entry {
@@ -319,35 +373,65 @@ button:hover {
 }
 
 .llm-content {
-    margin-top: 5px;
+    margin-top: 2px;
+    font-family: 'Consolas', monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: #d4d4d4;
 }
 
 .llm-content .thresholds {
     color: #9cdcfe;
-    margin-bottom: 8px;
+    margin: 0;
+    padding: 0;
     font-size: 12px;
+}
+
+.price-history {
+    margin: 2px 0;
+    padding: 2px;
+    background-color: #2d2d2d;
+    border: 1px solid #444;
+    border-radius: 4px;
+}
+
+.price-history strong {
+    color: #569cd6;
+    margin: 0;
+    padding: 0;
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+.price-history pre {
+    margin: 2px 0;
+    padding: 2px;
+    background-color: #2d2d2d;
+    color: #d4d4d4;
+    border-radius: 3px;
+    font-size: 0.9em;
+    line-height: 1.4;
+    min-height: 1.4em;
+}
+
+/* Style for empty price history */
+.price-history pre:empty::before {
+    content: 'No price history available';
+    color: #666;
+    font-style: italic;
+    padding: 2px;
 }
 
 .llm-content .request,
 .llm-content .response {
-    margin-top: 8px;
+    margin-top: 4px;
 }
 
 .llm-content strong {
     color: #569cd6;
     display: block;
-    margin-bottom: 4px;
-}
-
-.llm-content pre {
     margin: 0;
-    padding: 8px;
-    background-color: #1e1e1e;
-    border-radius: 4px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 12px;
-    line-height: 1.4;
+    padding: 0;
 }
 
 .log-type.info {
@@ -381,4 +465,23 @@ button:hover {
 .log-entry .timestamp {
     color: #569cd6;
     font-weight: bold;
+}
+
+/* Remove or comment out these duplicate styles:
+.price-history {
+    margin: 10px 0;
+    padding: 10px;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.price-history pre {
+    margin: 5px 0;
+    padding: 5px;
+    background-color: #f0f0f0;
+    border-radius: 3px;
+    font-size: 0.9em;
+    line-height: 1.4;
 } 
+*/ 

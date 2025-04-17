@@ -1,8 +1,7 @@
 // Import LLM service
 import { updateConfig, config } from './llm_service.js';
-
-// Import Logger
 import Logger from './logger.js';
+import PriceHistory from './price_history.js';
 
 // Load saved configuration
 async function loadConfig() {
@@ -210,6 +209,16 @@ function toggleConfig(configId) {
     toggleIcon.textContent = isExpanded ? '▶' : '▼';
 }
 
+// Function to view all price history
+async function viewAllHistory() {
+    try {
+        const history = await PriceHistory.getFormattedAllHistory();
+        logMessage(`All Price History:\n${history}`, 'info');
+    } catch (error) {
+        logMessage(`Error viewing all price history: ${error.message}`, 'error');
+    }
+}
+
 // Function to display log in the console window
 function displayLogInConsole(logEntry) {
     if (!logEntry) return;
@@ -231,9 +240,23 @@ function displayLogInConsole(logEntry) {
         // Create details section
         const details = document.createElement('div');
         details.className = 'llm-details';
+        
+        // Extract price history from the request
+        let priceHistory = '';
+        if (request) {
+            const priceHistoryMatch = request.match(/Previous price movements:\n([\s\S]*?)(?=\n\nAnalyze|$)/);
+            if (priceHistoryMatch && priceHistoryMatch[1]) {
+                priceHistory = priceHistoryMatch[1].trim();
+            }
+        }
+            
         details.innerHTML = `
             <div class="llm-content">
                 <div class="thresholds">Thresholds: ₹${lowerThreshold} - ₹${upperThreshold}</div>
+                <div class="price-history">
+                    <strong>Price History:</strong>
+                    <pre>${priceHistory || 'No recent price movements recorded.'}</pre>
+                </div>
                 <div class="request"><strong>Request:</strong><pre>${request}</pre></div>
                 <div class="response"><strong>Response:</strong><pre>${response}</pre></div>
             </div>`;
@@ -242,28 +265,48 @@ function displayLogInConsole(logEntry) {
         // Regular log entry
         let message = logEntry.message || '';
         
-        // Format JSON content if present
-        if (typeof message === 'string' && 
-            (message.startsWith('{') || message.startsWith('['))) {
-            try {
-                const jsonObj = JSON.parse(message);
-                const formattedJson = JSON.stringify(jsonObj, null, 2);
-                logDiv.innerHTML = `<span class="timestamp">[${logEntry.timestamp}]</span>  <span class="type">${logEntry.type.toUpperCase()}</span>  <span class="message">JSON Response:</span>`;
-                const pre = document.createElement('pre');
-                pre.textContent = formattedJson;
-                logDiv.appendChild(pre);
-                logContent.appendChild(logDiv);
-                logContent.scrollTop = logContent.scrollHeight;
-                return;
-            } catch (e) {
-                // Not valid JSON, continue with regular message
+        // Check if this is a price history log
+        if (message.includes('Price history for') && message.includes('\n')) {
+            const [header, ...historyLines] = message.split('\n');
+            const history = historyLines.join('\n').trim();
+            
+            // Create a formatted price history display
+            logDiv.innerHTML = `
+                <span class="timestamp">[${logEntry.timestamp}]</span>  
+                <span class="type">${logEntry.type.toUpperCase()}</span>  
+                <span class="message">${header}</span>`;
+            logContent.appendChild(logDiv);
+            
+            if (history) {
+                const historyDiv = document.createElement('div');
+                historyDiv.className = 'price-history';
+                historyDiv.innerHTML = `<pre>${history}</pre>`;
+                logContent.appendChild(historyDiv);
             }
-        }
+        } else {
+            // Format JSON content if present
+            if (typeof message === 'string' && 
+                (message.startsWith('{') || message.startsWith('['))) {
+                try {
+                    const jsonObj = JSON.parse(message);
+                    const formattedJson = JSON.stringify(jsonObj, null, 2);
+                    logDiv.innerHTML = `<span class="timestamp">[${logEntry.timestamp}]</span>  <span class="type">${logEntry.type.toUpperCase()}</span>  <span class="message">JSON Response:</span>`;
+                    const pre = document.createElement('pre');
+                    pre.textContent = formattedJson;
+                    logDiv.appendChild(pre);
+                    logContent.appendChild(logDiv);
+                    logContent.scrollTop = logContent.scrollHeight;
+                    return;
+                } catch (e) {
+                    // Not valid JSON, continue with regular message
+                }
+            }
 
-        // Regular message with stock symbol highlighting
-        const highlightedMessage = highlightStockSymbols(message);
-        logDiv.innerHTML = `<span class="timestamp">[${logEntry.timestamp}]</span>  <span class="type">${(logEntry.type || 'info').toUpperCase()}</span>  <span class="message">${highlightedMessage}</span>`;
-        logContent.appendChild(logDiv);
+            // Regular message with stock symbol highlighting
+            const highlightedMessage = highlightStockSymbols(message);
+            logDiv.innerHTML = `<span class="timestamp">[${logEntry.timestamp}]</span>  <span class="type">${(logEntry.type || 'info').toUpperCase()}</span>  <span class="message">${highlightedMessage}</span>`;
+            logContent.appendChild(logDiv);
+        }
     }
     
     logContent.scrollTop = logContent.scrollHeight;
@@ -298,36 +341,158 @@ function highlightStockSymbols(message) {
 
 // Function to send log to popup
 function logMessage(message, type = 'info', details = null) {
-    Logger.log(message, type, details).then(() => {
-        displayLogInConsole({
-            timestamp: new Date().toLocaleTimeString(),
-            type,
-            message,
-            details
-        });
+    // Ensure message is a string and not undefined
+    const formattedMessage = message ? String(message) : 'No message provided';
+    
+    // Ensure type is valid
+    const validTypes = ['info', 'success', 'warning', 'error', 'llm'];
+    const validType = validTypes.includes(type) ? type : 'info';
+    
+    // Format timestamp consistently
+    const timestamp = new Date().toLocaleTimeString('en-US', {
+        hour12: true,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    
+    // Create log entry object
+    const logEntry = {
+        timestamp,
+        type: validType,
+        message: formattedMessage,
+        details: details && typeof details === 'object' ? details : null
+    };
+
+    // Send to Logger and display in console
+    Logger.log(formattedMessage, validType, logEntry.details).then(() => {
+        displayLogInConsole(logEntry);
     }).catch(error => {
         console.error('Error logging message:', error);
+        // Display error in console without using Logger to avoid infinite loop
+        displayLogInConsole({
+            timestamp,
+            type: 'error',
+            message: `Error logging message: ${error.message}`
+        });
     });
 }
 
 // Function to load logs from storage
-function loadLogs() {
-    chrome.storage.local.get(['logs'], function(result) {
+async function loadLogs() {
+    try {
+        const { logs } = await chrome.storage.local.get('logs');
         const logContent = document.getElementById('logContent');
-        if (result.logs && result.logs.length > 0) {
-            result.logs.forEach(log => {
-                const logEntry = document.createElement('div');
-                logEntry.innerHTML = log.html;
-                logContent.appendChild(logEntry);
+        if (!logContent) return;
+
+        if (logs && logs.length > 0) {
+            // Filter out any invalid logs and ensure proper formatting
+            const validLogs = logs.filter(log => 
+                log && 
+                typeof log === 'object' && 
+                log.message !== undefined && 
+                log.type !== undefined
+            );
+
+            validLogs.forEach(log => {
+                // Ensure log has all required properties
+                const formattedLog = {
+                    timestamp: log.timestamp || new Date().toLocaleTimeString('en-US', {
+                        hour12: true,
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    }),
+                    type: log.type || 'info',
+                    message: log.message || '',
+                    details: log.details || null
+                };
+                displayLogInConsole(formattedLog);
             });
-            logContent.scrollTop = logContent.scrollHeight;
         }
-    });
+    } catch (error) {
+        console.error('Error loading logs:', error);
+        // Display error in console without using Logger to avoid infinite loop
+        const errorLog = {
+            timestamp: new Date().toLocaleTimeString('en-US', {
+                hour12: true,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }),
+            type: 'error',
+            message: `Error loading logs: ${error.message}`
+        };
+        displayLogInConsole(errorLog);
+    }
 }
 
 // Function to clear logs
-function clearLogs() {
-    Logger.clearLogs();
+async function clearLogs() {
+    try {
+        // Clear logs from storage using Logger
+        await Logger.clearLogs();
+        
+        // Clear the UI display
+        const logContent = document.getElementById('logContent');
+        if (logContent) {
+            logContent.innerHTML = '';
+        }
+        
+        // Log the clear action
+        logMessage('Logs cleared successfully', 'info');
+    } catch (error) {
+        console.error('Error clearing logs:', error);
+        logMessage(`Error clearing logs: ${error.message}`, 'error');
+    }
+}
+
+// Function to format log entry for export
+function formatLogEntryForExport(log) {
+    if (!log || !log.timestamp || !log.type) return '';
+
+    let formattedLog = `[${log.timestamp}] ${log.type.toUpperCase()}`;
+    
+    // Add details for LLM logs
+    if (log.type === 'llm' && log.details) {
+        const { symbol, request, response, currentPrice, lowerThreshold, upperThreshold, priceHistory } = log.details;
+        
+        // Only proceed if we have the minimum required data
+        if (!symbol || !request || !response) return '';
+
+        formattedLog += `  Analysis for ${symbol}`;
+        if (currentPrice) formattedLog += ` (₹${currentPrice})`;
+
+        if (lowerThreshold && upperThreshold) {
+            formattedLog += `\n\nThresholds: ₹${lowerThreshold} - ₹${upperThreshold}\n`;
+        }
+
+        if (priceHistory) {
+            formattedLog += `\nPrice History:\n${priceHistory}\n`;
+        }
+
+        formattedLog += `\nRequest:\n${request}\n`;
+
+        formattedLog += `\nResponse:\n${response}\n`;
+        
+        formattedLog += '\n----------------------------------------';
+    } else {
+        // Regular log entry
+        formattedLog += `  ${log.message || ''}`;
+        
+        // Add details for JSON responses
+        if (typeof log.message === 'string' && 
+            (log.message.startsWith('{') || log.message.startsWith('['))) {
+            try {
+                const jsonObj = JSON.parse(log.message);
+                formattedLog = `[${log.timestamp}] ${log.type.toUpperCase()}  JSON Response:\n${JSON.stringify(jsonObj, null, 2)}`;
+            } catch (e) {
+                // Not valid JSON, keep original format
+            }
+        }
+    }
+    
+    return formattedLog;
 }
 
 // Function to copy logs to clipboard
@@ -340,9 +505,7 @@ async function copyLogs() {
         }
 
         // Format logs for copying
-        const formattedLogs = logs.map(log => 
-            `[${log.timestamp}] ${log.type.toUpperCase()}  ${log.message}`
-        ).join('\n');
+        const formattedLogs = logs.map(log => formatLogEntryForExport(log)).join('\n\n');
 
         // Copy to clipboard
         await navigator.clipboard.writeText(formattedLogs);
@@ -366,11 +529,35 @@ async function downloadLogs() {
         const date = new Date().toISOString().split('T')[0];
         const filename = `stock_monitor_logs_${date}.txt`;
 
-        // Format and combine all logs
-        const allLogs = Logger.formatLogsForDownload(logs, llm_interactions);
+        // Format all logs
+        const formattedLogs = logs
+            .filter(log => log && log.message) // Filter out invalid logs
+            .map(log => formatLogEntryForExport(log))
+            .join('\n\n');
+        
+        // Format LLM interactions if any
+        let llmSection = '';
+        if (llm_interactions && llm_interactions.length > 0) {
+            const validInteractions = llm_interactions.filter(interaction => 
+                interaction && 
+                interaction.type === 'llm' && 
+                interaction.details && 
+                interaction.details.symbol && 
+                interaction.details.request && 
+                interaction.details.response
+            );
+
+            if (validInteractions.length > 0) {
+                llmSection = '\n\n================== LLM INTERACTIONS ==================\n\n' +
+                    validInteractions.map(interaction => formatLogEntryForExport(interaction)).join('\n\n');
+            }
+        }
+
+        // Combine all content
+        const allContent = formattedLogs + llmSection;
 
         // Create blob and download
-        const blob = new Blob([allLogs], { type: 'text/plain' });
+        const blob = new Blob([allContent], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -389,13 +576,61 @@ async function downloadLogs() {
 
 // Load existing logs when popup opens
 async function loadExistingLogs() {
-    const { logs } = await Logger.getLogs();
-    const logContent = document.getElementById('logContent');
-    logContent.innerHTML = ''; // Clear existing content
+    try {
+        const { logs } = await Logger.getLogs();
+        const logContent = document.getElementById('logContent');
+        if (!logContent) return;
+        
+        logContent.innerHTML = ''; // Clear existing content
     
-    logs.forEach(log => {
-        displayLogInConsole(log);
-    });
+        // Filter out any invalid logs and ensure proper formatting
+        const validLogs = logs.filter(log => 
+            log && 
+            typeof log === 'object' && 
+            log.message !== undefined && 
+            log.type !== undefined
+        );
+    
+        validLogs.forEach(log => {
+            // Ensure log has all required properties
+            const formattedLog = {
+                timestamp: log.timestamp || new Date().toLocaleTimeString('en-US', {
+                    hour12: true,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                }),
+                type: log.type || 'info',
+                message: log.message || '',
+                details: log.details || null
+            };
+            displayLogInConsole(formattedLog);
+        });
+    } catch (error) {
+        console.error('Error loading existing logs:', error);
+        // Display error in console without using Logger to avoid infinite loop
+        const errorLog = {
+            timestamp: new Date().toLocaleTimeString('en-US', {
+                hour12: true,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }),
+            type: 'error',
+            message: `Error loading logs: ${error.message}`
+        };
+        displayLogInConsole(errorLog);
+    }
+}
+
+// Function to view price history for a stock
+async function viewPriceHistory(symbol) {
+    try {
+        const history = await PriceHistory.getFormattedHistory(symbol);
+        logMessage(`Price history for ${symbol}:\n${history}`, 'info');
+    } catch (error) {
+        logMessage(`Error viewing price history for ${symbol}: ${error.message}`, 'error');
+    }
 }
 
 // Initialize the popup
@@ -493,4 +728,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         consoleLogHeader.classList.add('active');
         consoleLogHeader.querySelector('.toggle-icon').textContent = '▼';
     }
+
+    // Add event listener for view all history button
+    document.getElementById('viewAllHistory').addEventListener('click', viewAllHistory);
 });

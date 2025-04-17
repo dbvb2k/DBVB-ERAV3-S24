@@ -1,5 +1,6 @@
 // Import Logger
 import Logger from './logger.js';
+import PriceHistory from './price_history.js';
 
 // Stock symbol to MoneyControl code mapping
 const stockSymbolMap = {
@@ -27,27 +28,47 @@ const notificationState = {};
 // Track LLM call times
 const llmCallState = {};
 
+// Add a variable to track if we've already logged the no stocks message
+let hasLoggedNoStocks = false;
+
 // Function to send logs to popup
 function sendLogToPopup(message, type = 'info', details = null) {
-    Logger.log(message, type, details);
+    // Ensure message is a string and not undefined
+    const formattedMessage = message ? String(message) : 'No message provided';
+    
+    // Ensure type is valid
+    const validTypes = ['info', 'success', 'warning', 'error', 'llm'];
+    const validType = validTypes.includes(type) ? type : 'info';
+    
+    // Ensure details is an object if provided
+    const validDetails = details && typeof details === 'object' ? details : null;
+    
+    Logger.log(formattedMessage, validType, validDetails);
 }
 
 // Function to format API response for logging
 function formatAPIResponse(response) {
     try {
+        if (!response || !response.data) {
+            return { error: 'Invalid response data' };
+        }
+        
         const responseData = response.data;
         return {
-            symbol: responseData.NSEID,
-            price: responseData.pricecurrent,
-            change: responseData.pricechange,
-            changePercent: responseData.pricepercentchange,
-            volume: responseData.VOL,
-            dayRange: `₹${responseData.LP} - ₹${responseData.HP}`,
-            yearRange: `₹${responseData['52L']} - ₹${responseData['52H']}`,
-            lastUpdate: responseData.lastupd
+            symbol: responseData.NSEID || 'Unknown',
+            price: responseData.pricecurrent || 0,
+            change: responseData.pricechange || 0,
+            changePercent: responseData.pricepercentchange || 0,
+            volume: responseData.VOL || 0,
+            dayRange: `₹${responseData.LP || 0} - ₹${responseData.HP || 0}`,
+            yearRange: `₹${responseData['52L'] || 0} - ₹${responseData['52H'] || 0}`,
+            lastUpdate: responseData.lastupd || new Date().toISOString()
         };
     } catch (error) {
-        return response;
+        return {
+            error: error.message,
+            rawResponse: response
+        };
     }
 }
 
@@ -84,6 +105,8 @@ async function fetchStockPrice(symbol) {
         
         if (responseJson && responseJson.data && responseJson.data.pricecurrent) {
             const price = parseFloat(responseJson.data.pricecurrent);
+            // Store price in history
+            await PriceHistory.addPrice(symbol, price);
             await Logger.log(`Current price for ${symbol}: ${price}`, 'success');
             return price;
         } else {
@@ -134,12 +157,16 @@ async function getLLMResponse(symbol, currentPrice, lowerThreshold, upperThresho
             conversationHistory[symbol] = [];
         }
 
+        // Get price history
+        const priceHistory = await PriceHistory.getFormattedHistory(symbol);
+
         // Build the prompt
         const prompt = `You are a stock monitoring agent. Your task is to monitor ${symbol} stock price.
 Current price: ₹${currentPrice}
 Lower threshold: ₹${lowerThreshold}
 Upper threshold: ₹${upperThreshold}
-Previous price movements: ${conversationHistory[symbol].slice(-5).join('\n')}
+Previous price movements:
+${priceHistory}
 
 Analyze the current situation and provide a brief recommendation. Consider:
 1. How far is the price from thresholds?
@@ -154,7 +181,8 @@ Respond in a concise format.`;
             request: prompt,
             currentPrice,
             lowerThreshold,
-            upperThreshold
+            upperThreshold,
+            priceHistory
         });
 
         // Simulate LLM response with more detailed analysis
@@ -254,9 +282,16 @@ async function checkStocks() {
         const { stocks, llm_config } = await chrome.storage.local.get(['stocks', 'llm_config']);
         
         if (!stocks || stocks.length === 0) {
-            await Logger.log('No stocks being monitored', 'info');
+            // Only log if we haven't logged this message yet
+            if (!hasLoggedNoStocks) {
+                await Logger.log('No stocks being monitored', 'info');
+                hasLoggedNoStocks = true;
+            }
             return;
         }
+        
+        // Reset the flag when we have stocks
+        hasLoggedNoStocks = false;
 
         // Use default config if none exists
         const config = llm_config || {
@@ -402,15 +437,22 @@ setTimeout(() => {
 // Reset alert states when stocks are modified
 chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local' && changes.stocks) {
-        // Clear alert states for removed stocks
         const newStocks = changes.stocks.newValue || [];
+        
+        // Reset hasLoggedNoStocks when stocks are modified
+        if (newStocks.length > 0) {
+            hasLoggedNoStocks = false;
+        }
+        
+        // Clear alert states for removed stocks
         const stockSymbols = new Set(newStocks.map(s => s.symbol));
         
-        // Remove alert states for stocks that are no longer monitored
+        // Remove alert states and price history for stocks that are no longer monitored
         Object.keys(alertStates).forEach(symbol => {
             if (!stockSymbols.has(symbol)) {
                 delete alertStates[symbol];
-                sendLogToPopup(`Removed alert state for ${symbol}`, 'info');
+                PriceHistory.removeStockHistory(symbol);
+                sendLogToPopup(`Removed alert state and price history for ${symbol}`, 'info');
             }
         });
 
